@@ -1,6 +1,9 @@
 #!python
 
-#http://www.scipy.org/Cookbook/SavitzkyGolay
+# recommended by a question on http://dsp.stackexchange.com/ 
+# (Can't remember the link; TODO find the question again)
+#
+# http://www.scipy.org/Cookbook/SavitzkyGolay
 
 import numpy as np
 
