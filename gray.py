@@ -1,6 +1,12 @@
 #!python
 
-# 
+# Find the q60 in a scanned image using the gray surround of the q60. The gray
+# of the q60 should be the 2nd most populous color in the image (the white of
+# the flatbed lid should be the first). Find the 2nd highest peak in the
+# histogram to determine the gray level of the q60 scan. 
+#
+# Once we know the gray level, we can find the boundary of the q60.
+#
 # Split from q60.py on 15-Jun
 #
 # davep 15-Jun-2013
@@ -20,7 +26,6 @@ def find_gray_midpoint( ndata ) :
     # the q60 is the majority color. Because the gray level might be different
     # depending in how the q60 was scanned (PIE, noPIE, different sensors,
     # different IQ settings, etc), find the majority gray value. That 
-    #
 
     peaks_list, pixel_counts = peaks.find_histogram_peaks(ndata)
     print "peaks=",peaks_list
@@ -48,7 +53,7 @@ def calc_gray_boundaries(ndata) :
 
     return gray_low, gray_high
 
-def gray_boundaries( ndata, gray_low, gray_high ) :
+def find_gray_boundaries( ndata, gray_low, gray_high ) :
 
     gray1 = np.where(ndata>gray_low,ndata,0)
 
@@ -73,7 +78,7 @@ def main() :
     ndata = imtools.load_image( infilename, mode="L", dtype="uint8" )
 
     gray_low, gray_high = calc_gray_boundaries( ndata )
-    gray_bounds = gray_boundaries( ndata, gray_low, gray_high )
+    gray_bounds = find_gray_boundaries( ndata, gray_low, gray_high )
 
 if __name__ == '__main__' : 
     main()
