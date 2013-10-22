@@ -58,7 +58,7 @@ def straightness_test( ndata, gray_low, gray_high, sample_size=60 ) :
     if int_aspect_ratio < 70 or int_aspect_ratio > 75 :
         errmsg = "aspect_ratio={0} out of range".format(aspect_ratio)
         print >>sys.stderr, errmsg
-        assert 0
+#        assert 0
         return False
 
     # Grab a square sample from all four edges. If those samples look pretty
