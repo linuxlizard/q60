@@ -17,62 +17,63 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 import savitzky_golay
 
 import imtools
-import histo
+#import histo
 from basename import get_basename
 import peaks
 import straight
+import gray
 
 #bezel_row = 20
 #bezel_col = 10
 
 # Calculated by find_gray_midpoint(). Used in a few places through the code so
 # made a global.
-gray_low = 0
-gray_high = 0
+#gray_low = 0
+#gray_high = 0
 
 mkoutfilename = None
 
 ROTATE_COUNTER_CLOCKWISE = "CCW"
 ROTATE_CLOCKWISE = "CW"
 
-def find_gray_midpoint( ndata ) : 
-
-    # The incoming data is grayscale.  Other than white, the gray background of
-    # the q60 is the majority color. Because the gray level might be different
-    # depending in how the q60 was scanned (PIE, noPIE, different sensors,
-    # different IQ settings, etc), find the majority gray value. That 
-    #
-
-    peaks_list, pixel_counts = peaks.find_histogram_peaks(ndata)
-    print "peaks=",peaks_list
-    print "counts=",pixel_counts
-
-#    # highest should be white
-#    # 2nd highest should be the q60's background gray
-#    white_idx = np.argmax(pixel_counts)
-#    print "white_idx=",white_idx
+#def find_gray_midpoint( ndata ) : 
 #
-#    pixel_counts.pop(white_idx)
-#    gray_idx = np.argmax(pixel_counts)
-#    print "gray_idx=",gray_idx
+#    # The incoming data is grayscale.  Other than white, the gray background of
+#    # the q60 is the majority color. Because the gray level might be different
+#    # depending in how the q60 was scanned (PIE, noPIE, different sensors,
+#    # different IQ settings, etc), find the majority gray value. That 
+#    #
+#
+#    peaks_list, pixel_counts = peaks.find_histogram_peaks(ndata)
+#    print "peaks=",peaks_list
+#    print "counts=",pixel_counts
+#
+##    # highest should be white
+##    # 2nd highest should be the q60's background gray
+##    white_idx = np.argmax(pixel_counts)
+##    print "white_idx=",white_idx
+##
+##    pixel_counts.pop(white_idx)
+##    gray_idx = np.argmax(pixel_counts)
+##    print "gray_idx=",gray_idx
+#
+#    # davep 19-Sep-2013 ; let's assume we're running a PIE image so the gray
+#    # midpoint should be ~128. Look for the point closes to 128.
+#    for gray_idx in range(len(peaks_list)) : 
+#        if peaks_list[gray_idx] > 120 and peaks_list[gray_idx] < 130 : 
+#            return peaks_list[gray_idx]
+#
+#    raise Exception( "Bad gray midpoint" )
 
-    # davep 19-Sep-2013 ; let's assume we're running a PIE image so the gray
-    # midpoint should be ~128. Look for the point closes to 128.
-    for gray_idx in range(len(peaks_list)) : 
-        if peaks_list[gray_idx] > 120 and peaks_list[gray_idx] < 130 : 
-            return peaks_list[gray_idx]
-
-    raise Exception( "Bad gray midpoint" )
-
-def calc_gray_boundaries(ndata) :
-
-    gray_midpoint = find_gray_midpoint( ndata )
-
-    global gray_low, gray_high
-    gray_low = gray_midpoint - 10
-    gray_high = gray_midpoint + 10
-
-    print "gray_low={0} gray_high={1}".format(gray_low,gray_high)
+#def calc_gray_boundaries(ndata) :
+#
+#    gray_midpoint = find_gray_midpoint( ndata )
+#
+#    global gray_low, gray_high
+#    gray_low = gray_midpoint - 10
+#    gray_high = gray_midpoint + 10
+#
+#    print "gray_low={0} gray_high={1}".format(gray_low,gray_high)
 
 def draw_hypotenuse( imgfilename, nz) :
     upper_left = nz[0][0],nz[1][0]
@@ -167,6 +168,19 @@ def detect_rotation_angle( gray_bbox, rotate_direction) :
 
     return angle,hyp_length
     
+def clip_rotated( ndata, hyp_length ) : 
+    # clip the rotated image down to just the Q60 image
+    q60_width = hyp_length
+    # use the known aspect ratio to deduce height
+    q60_height = int(round((q60_width*5.0)/7.0))
+    print "q60 width={0} height={1}".format(q60_width,q60_height)
+    col_pad = (ndata.shape[1]-q60_width)/2
+    row_pad = (ndata.shape[0]-q60_height)/2
+    print "row_pad={0} col_pad={1}".format(row_pad,col_pad)
+    q60 = ndata[ row_pad:row_pad+q60_height, col_pad:col_pad+q60_width ]
+    print "q60=",q60.shape
+    imtools.clip_and_save(q60,mkoutfilename("q60"))
+
 def main() :
     infilename = sys.argv[1]
 
@@ -178,16 +192,22 @@ def main() :
     ndata = imtools.load_image( infilename, mode="L", dtype="uint8" )
     print ndata.dtype, ndata.shape
 
+#    # davep 19-Oct-2013 ; testing clip_rotated
+#    clip_rotated(ndata,2074)
+#    return
+    
 #        # get rid of the obnoxious bezel shadow in my test image >:-(
 #        ndata = ndata[ bezel_row:, bezel_col: ]
 
     # aggressive median filter to smooth out as much noise as possible
+    print "filtering..."
     fdata = scipy.ndimage.filters.median_filter( ndata, size=(5,5) )
 
     imtools.clip_and_save( fdata, mkoutfilename("gray"))
 
     # find the optimum gray midpoint 
-    calc_gray_boundaries(fdata)
+    print "finding boundaries..."
+    gray_low,gray_high = gray.calc_gray_boundaries(fdata)
     # XXX temp debug ; leave here while working on gray background discovery
 #    return
 
@@ -240,7 +260,8 @@ def main() :
         imtools.clip_and_save(bbox,mkoutfilename("q60"))
         return
 
-    assert 0
+    # davep 10-Oct-2013 ; stop here while testing straightness test 
+#    assert 0
     print "is not straight enough so lets rotate"
 
     # davep 19-Sep-2013 ;  new de-skew
@@ -251,20 +272,13 @@ def main() :
     print "angle={0}={1} hyp={2}".format(
             rotation_angle,math.degrees(rotation_angle),hyp_length)
 
+    print "rotating radians={0} degrees={1}...".format(rotation_angle,
+                            math.degrees(rotation_angle))
     rot = scipy.ndimage.interpolation.rotate( bbox, math.degrees(rotation_angle) )
     print "rot=",rot.shape
     imtools.clip_and_save(rot,mkoutfilename("rot"))
 
-    q60_width = hyp_length
-    # use the known aspect ratio to deduce height
-    q60_height = int(round((q60_width*5.0)/7.0))
-    print "q60 width={0} height={1}".format(q60_width,q60_height)
-    col_pad = (rot.shape[1]-q60_width)/2
-    row_pad = (rot.shape[0]-q60_height)/2
-    print "row_pad={0} col_pad={1}".format(row_pad,col_pad)
-    q60 = rot[ row_pad:q60_height, col_pad:q60_width ]
-    print "q60=",q60.shape
-    imtools.clip_and_save(q60,mkoutfilename("q60"))
+    clip_rotated(rot,hyp_length)
 
 #    # XXX temp debug ; leave here while working on new de-skew straightness test
     sys.exit(0)
