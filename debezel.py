@@ -1,5 +1,10 @@
 #!python
 
+# Q&D remove bezel (black along top/left). Untuned firmware can capture parts
+# of the plastic bezel holding the glass.
+#
+# davep 
+
 import sys
 import numpy as np
 #import matplotlib.pyplot as plt
