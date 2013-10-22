@@ -1,6 +1,8 @@
 #!python
 
 # Originally part of my auto white point code. Moved to own module.
+# Find peaks in histogram. 
+#
 # davep 03-June-2013
 
 import sys
@@ -12,7 +14,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 import savitzky_golay
 
 import imtools
-import histo
+#import histo
 
 mkoutfilename = None
 
@@ -169,8 +171,8 @@ def find_histogram_peaks( ndata, num_peaks=5 ) :
     hist = tmp
     del tmp
 
-    if 0 : 
-        # smmothed 1st derivative of the signal
+    if 1 : 
+        # smoothed 1st derivative of the signal
         svg = savitzky_golay.savitzky_golay( hist, 21, 5, 1 )
         np.save("svg.npy",svg)
 
