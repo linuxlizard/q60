@@ -39,8 +39,9 @@ def find_fiducials(ndata):
         debug = []
 
         logging.debug("row_idx={0}".format(row_idx))
-        # process pixel by pixel
-        for col_idx in range(len(row)):
+        # process pixel by pixel; only search the first half of the image. If
+        # we haven't found it by 4", we're not going to find it.
+        for col_idx in range(len(row)/2):
 
             # XXX debug specific row
             if row_idx==14 : 
@@ -134,7 +135,18 @@ def find_fiducials(ndata):
             else : 
                 pass
 
-    return fiducial_list
+    # filter_fiducials() removes the outliers
+    return filter_fiducials( fiducial_list )
+
+def filter_fiducials( fiducial_list ) : 
+    # Calculate north,south distance for each point. Remove any points with no
+    # neighbor within some distance.
+
+    # fiducial_list is an array of tuples
+    # [0] is row
+    # [1] is col
+
+    return filtered_fiducial_list
 
 def find_fiducials_in_file(infilename):
     ndata = imtools.load_image(infilename,mode="L")
