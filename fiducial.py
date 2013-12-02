@@ -7,6 +7,11 @@
 import sys
 import numpy as np
 import logging
+import pickle
+import math
+import itertools
+from scipy.cluster.vq import kmeans,vq
+#import matplotlib.pyplot as plt
 
 import imtools
 
@@ -130,13 +135,17 @@ def find_fiducials(ndata):
                 elif row[col_idx] < -edge_threshold : 
                     distance = 0
                     print "found fiducial at row={0} col={1}".format(row_idx,col_idx)
-                    fiducial_list.append((row_idx,col_idx))
+                    fiducial_list.append({"row":row_idx,"col":col_idx})
                     break
             else : 
                 pass
 
     # filter_fiducials() removes the outliers
     return filter_fiducials( fiducial_list )
+
+def euclidian(p1,p2):
+    # calculate euclidian distance
+    return math.sqrt( (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2 )
 
 def filter_fiducials( fiducial_list ) : 
     # Calculate north,south distance for each point. Remove any points with no
@@ -146,12 +155,64 @@ def filter_fiducials( fiducial_list ) :
     # [0] is row
     # [1] is col
 
+#    filtered_fiducial_list = fiducial_list
+#    return filtered_fiducial_list
+
+    # calculate distance to next fiducial
+    for i in range(len(fiducial_list)-1):
+        fiducial_list[i]["dist_next"] = euclidian( 
+            (fiducial_list[i]["row"],fiducial_list[i]["col"]),
+            (fiducial_list[i+1]["row"],fiducial_list[i+1]["col"]) )
+    fiducial_list[-1]["dist_next"] = 1e9
+
+    # calculate distance to previous fiducial
+    fiducial_list[0]["dist_prev"] = 1e9
+    for i in range(1,len(fiducial_list)):
+        fiducial_list[i]["dist_prev"] = euclidian( 
+            (fiducial_list[i]["row"],fiducial_list[i]["col"]),
+            (fiducial_list[i-1]["row"],fiducial_list[i-1]["col"]) )
+
+    filtered_fiducial_list = [ fid for fid in fiducial_list if  
+                                fid["dist_next"] < 5 or fid["dist_prev"] < 5 ]
+
     return filtered_fiducial_list
 
-def find_fiducials_in_file(infilename):
-    ndata = imtools.load_image(infilename,mode="L")
+def make_clusters( fiducial_list ) : 
+    # everyone starts outside a group
+    for fid in fiducial_list : 
+        fid["group"] = 0
 
-    fiducial_list = find_fiducials(ndata)
+    # Sort-of a connected compontents algorithm. The data has a number of
+    # restrictions that make it easier. There is only one point per row. The
+    # points are sparsely distributed (can do stupid iterative searches without
+    # much speed penalty).
+    #
+    # Iterate through the list.
+    #
+    # If node not already in a group, create a new group. 
+    #
+    # Check if next neighbor (next row) is close enough to belong to the same
+    # group.
+    #
+    group_id = itertools.count(1)
+    for i in range(len(fiducial_list)-1):
+        if fiducial_list[i]["group"]==0 :
+            # start a new group
+            fiducial_list[i]["group"] = group_id.next()
+
+        # is my neighbor close enough to belong to my group?
+        if fiducial_list[i+1]["group"] == 0 and fiducial_list[i]["dist_next"] < 5 :
+            fiducial_list[i+1]["group"] = fiducial_list[i]["group"]
+
+    # last node
+    if fiducial_list[-1]["group"]==0 :
+        # start a new group
+        fiducial_list[-1]["group"] = group_id.next()
+
+
+def write_fiducial_image( infilename, fiducial_list ) :
+    # load the mono image, convert to color, write red dots on the image where
+    # we think we found the fiducial
 
     ndata = imtools.load_image(infilename,mode="L",dtype="uint8")
     # make into an RGB image
@@ -161,10 +222,52 @@ def find_fiducials_in_file(infilename):
     rgbdata[:,:,2] = ndata
 
     for fiducial in fiducial_list:
-        rgbdata[fiducial[0],fiducial[1],0] = 255
-        rgbdata[fiducial[0],fiducial[1],1] = 0 
-        rgbdata[fiducial[0],fiducial[1],2] = 0 
+        row = fiducial["row"]
+        col = fiducial["col"]
+        rgbdata[row,col,0] = 255
+        rgbdata[row,col,1] = 0 
+        rgbdata[row,col,2] = 0 
     imtools.clip_and_save(rgbdata,"out.tif")
+
+def find_fiducials_in_file(infilename):
+    ndata = imtools.load_image(infilename,mode="L")
+
+    # While developing the filter code, save the fiducials list to a pickle.
+    # The image processing part is a bit slow.
+    if 0 : 
+        fiducial_list = find_fiducials(ndata)
+        with open("fid.dat","wb") as pfile:
+            pickle.dump(fiducial_list,pfile)
+    else : 
+        with open("fid.dat","rb") as pfile:
+            fiducial_list = pickle.load(pfile)
+
+    filtered_fiducial_list = filter_fiducials(fiducial_list)
+    print fiducial_list
+
+    write_fiducial_image(infilename,fiducial_list)
+#    write_fiducial_image(infilename,filtered_fiducial_list)
+
+    clusters = make_clusters(filtered_fiducial_list)
+
+    for fid in filtered_fiducial_list :
+        print fid["row"], fid["col"], fid["dist_prev"],fid["dist_next"],fid["group"]
+
+    data = np.asarray([ (fid["row"],fid["col"]) for fid in filtered_fiducial_list ])
+
+    # http://glowingpython.blogspot.com/2012/04/k-means-clustering-with-scipy.html
+    # computing K-Means with K = 2 (2 clusters)
+    centroids,_ = kmeans(data,2)
+    # assign each sample to a cluster
+    idx,_ = vq(data,centroids)
+
+    print centroids
+
+#    plt.plot(data[idx==0,0],data[idx==0,1],'ob',
+#     data[idx==1,0],data[idx==1,1],'or',
+#     data[idx==2,0],data[idx==2,1],'og') # third cluster points
+#    plt.plot(centroids[:,0],centroids[:,1],'sm',markersize=8)
+#    plt.show()
 
 def main() : 
     logging.basicConfig(format='%(levelname)s:%(message)s',level=logging.INFO)
