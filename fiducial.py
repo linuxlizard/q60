@@ -10,10 +10,14 @@ import logging
 import pickle
 import math
 import itertools
+import Image
+import ImageDraw
 from scipy.cluster.vq import kmeans,vq
 #import matplotlib.pyplot as plt
 
 import imtools
+
+FIDUCIAL_WIDTH = 40
 
 STATE_INIT=0
 STATE_SEEK_NEGATIVE_EDGE=1  # large negative difference
@@ -209,6 +213,13 @@ def make_clusters( fiducial_list ) :
         # start a new group
         fiducial_list[-1]["group"] = group_id.next()
 
+    clusters_hash = {}
+    for fid in fiducial_list : 
+        if fid["group"] not in clusters_hash:
+            clusters_hash[fid["group"]] = []
+        clusters_hash[fid["group"]].append(fid)
+
+    return clusters_hash
 
 def write_fiducial_image( infilename, fiducial_list ) :
     # load the mono image, convert to color, write red dots on the image where
@@ -229,12 +240,34 @@ def write_fiducial_image( infilename, fiducial_list ) :
         rgbdata[row,col,2] = 0 
     imtools.clip_and_save(rgbdata,"out.tif")
 
+def draw_fiducials(infilename,fiducial_points_list):
+    # fiducial_points_list is a list of lists
+    # [0] - list of points in fiducial #0
+    # [1] - list of points in fiducial #1
+    # ...
+    # [n] - list of points in fiducial #n
+    
+    img = Image.open(infilename)
+    img.load()
+
+    draw = ImageDraw.Draw(img)
+
+    for fiducial_points in fiducial_points_list : 
+        # note I'm swapping from NumPy "row,col" to PIL's "x,y"
+        top_right = (fiducial_points[0]["col"],fiducial_points[0]["row"])
+        bottom_right = (fiducial_points[-1]["col"],fiducial_points[-1]["row"])
+        top_left = top_right[0]-FIDUCIAL_WIDTH,top_right[1]
+
+        draw.rectangle((top_left,bottom_right),outline=(0xff,0,0))
+
+    img.save("fid.tif")
+
 def find_fiducials_in_file(infilename):
     ndata = imtools.load_image(infilename,mode="L")
 
     # While developing the filter code, save the fiducials list to a pickle.
     # The image processing part is a bit slow.
-    if 0 : 
+    if 1 : 
         fiducial_list = find_fiducials(ndata)
         with open("fid.dat","wb") as pfile:
             pickle.dump(fiducial_list,pfile)
@@ -243,25 +276,41 @@ def find_fiducials_in_file(infilename):
             fiducial_list = pickle.load(pfile)
 
     filtered_fiducial_list = filter_fiducials(fiducial_list)
-    print fiducial_list
+#    print fiducial_list
 
     write_fiducial_image(infilename,fiducial_list)
 #    write_fiducial_image(infilename,filtered_fiducial_list)
 
-    clusters = make_clusters(filtered_fiducial_list)
+    clusters_hash = make_clusters(filtered_fiducial_list)
+    print clusters_hash.keys()
 
-    for fid in filtered_fiducial_list :
-        print fid["row"], fid["col"], fid["dist_prev"],fid["dist_next"],fid["group"]
+    for k in clusters_hash:
+        print k, len(clusters_hash[k])
 
-    data = np.asarray([ (fid["row"],fid["col"]) for fid in filtered_fiducial_list ])
+    # Of all the connected components we found, the largest two groups should
+    # be our fiducials. 
+    group_ids = clusters_hash.keys()
+    group_ids.sort( 
+        lambda k1, k2 : cmp( len(clusters_hash[k2]), len(clusters_hash[k1]) )
+        )
+    print group_ids
 
-    # http://glowingpython.blogspot.com/2012/04/k-means-clustering-with-scipy.html
-    # computing K-Means with K = 2 (2 clusters)
-    centroids,_ = kmeans(data,2)
-    # assign each sample to a cluster
-    idx,_ = vq(data,centroids)
+    # first two elements should be our largest groups
+    draw_fiducials(infilename,(clusters_hash[group_ids[0]],
+                               clusters_hash[group_ids[1]]))
 
-    print centroids
+#    for fid in filtered_fiducial_list :
+#        print fid["row"], fid["col"], fid["dist_prev"],fid["dist_next"],fid["group"]
+
+#    data = np.asarray([ (fid["row"],fid["col"]) for fid in filtered_fiducial_list ])
+#
+#    # http://glowingpython.blogspot.com/2012/04/k-means-clustering-with-scipy.html
+#    # computing K-Means with K = 2 (2 clusters)
+#    centroids,_ = kmeans(data,2)
+#    # assign each sample to a cluster
+#    idx,_ = vq(data,centroids)
+#
+#    print centroids
 
 #    plt.plot(data[idx==0,0],data[idx==0,1],'ob',
 #     data[idx==1,0],data[idx==1,1],'or',
@@ -270,8 +319,8 @@ def find_fiducials_in_file(infilename):
 #    plt.show()
 
 def main() : 
-    logging.basicConfig(format='%(levelname)s:%(message)s',level=logging.INFO)
-#    logging.basicConfig(format='%(levelname)s:%(message)s',level=logging.DEBUG)
+#    logging.basicConfig(format='%(levelname)s:%(message)s',level=logging.INFO)
+    logging.basicConfig(format='%(levelname)s:%(message)s',level=logging.DEBUG)
     infilename = sys.argv[1]
 
     find_fiducials_in_file(infilename)
