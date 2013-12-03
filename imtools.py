@@ -17,6 +17,9 @@ def load_image( infilename, **kargs ):
     img = Image.open( infilename ) 
     img.load()
 
+    if img.mode=="RGBA":
+        img = img.convert("RGB")
+
     if "mode" in kargs :
         if kargs["mode"]=="L" and img.mode == "RGB" : 
             # use PIL to convert RGB->L
