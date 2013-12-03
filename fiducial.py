@@ -13,6 +13,7 @@ import itertools
 import Image
 import ImageDraw
 from scipy.cluster.vq import kmeans,vq
+import scipy.ndimage.filters
 #import matplotlib.pyplot as plt
 
 import imtools
@@ -25,6 +26,7 @@ STATE_SEEK_POSITIVE_EDGE=2  # large positive difference
 STATE_SEEK_FLAT=3           # small or no difference
 STATE_SEEK_POSITIVE_EDGE_2=4  # large positive difference
 STATE_SEEK_NEGATIVE_EDGE_2=5  # large negative difference
+STATE_SEEK_FLAT_2=6           # small or no difference
 
 #STATE_SEEK_BLACK=10  # search for black line of fiducial
 #STATE_SEEK_WHITE=11  # search for white line of fiducial
@@ -42,8 +44,8 @@ def find_fiducials(ndata):
         state = STATE_SEEK_NEGATIVE_EDGE
 
         # for testing, stop here
-#        if row_idx > 1000 : 
-#            break
+#        if row_idx > 50 : 
+#            return fiducial_list
 
         debug = []
 
@@ -53,9 +55,9 @@ def find_fiducials(ndata):
         for col_idx in range(len(row)/2):
 
             # XXX debug specific row
-            if row_idx==14 : 
-                logging.debug("row={2} col_idx={0} pixel={1}".format(
-                            col_idx,row[col_idx],row_idx))
+            if row_idx==139: 
+                logging.debug("row={2} col_idx={0} pixel={1} state={3}".format(
+                            col_idx,row[col_idx],row_idx,state))
 
             if state==STATE_SEEK_NEGATIVE_EDGE :
                 if row[col_idx] < -edge_threshold : 
@@ -90,13 +92,15 @@ def find_fiducials(ndata):
                 distance += 1
                 if distance > max_distance : 
                     # didn't find what we wanted within distance; restart search
-                    logging.debug("fail distance={0} > max_distance={1}".format(
-                            distance, max_distance ) )
+                    logging.debug("fail distance={0} > max_distance={1} state={2}".format(
+                            distance, max_distance, state ) )
                     distance = 0
                     logging.debug("restart at state={0} col={1}".format(
                             state,col_idx))
                     state = STATE_SEEK_NEGATIVE_EDGE
                 elif row[col_idx]>-flat_threshold and row[col_idx]<flat_threshold :
+                    # success! we found enough flat space. now start looking
+                    # for a positive edge within 50 pixels
                     distance = 0
                     max_distance = 50
                     state = STATE_SEEK_POSITIVE_EDGE_2
@@ -108,8 +112,8 @@ def find_fiducials(ndata):
                 distance += 1
                 if distance > max_distance : 
                     # didn't find what we wanted within distance; restart search
-                    logging.debug("fail distance={0} > max_distance={1}".format(
-                            distance, max_distance ) )
+                    logging.debug("fail distance={0} > max_distance={1} state={2}".format(
+                            distance, max_distance, state ) )
                     distance = 0
                     logging.debug("restart at state={0} col={1}".format(
                             state,col_idx))
@@ -117,14 +121,16 @@ def find_fiducials(ndata):
                 elif row[col_idx] < -edge_threshold : 
                     # oops ; found an edge in the wrong direction
                     # so restart
-                    logging.debug("fail distance={0} > max_distance={1}".format(
-                            distance, max_distance ) )
+                    logging.debug("fail pixel={0} < threshold{1}".format(
+                            row[col_idx], -edge_threshold ) )
                     distance = 0
                     logging.debug("restart at state={0} col={1}".format(
                             state,col_idx))
                     state = STATE_SEEK_NEGATIVE_EDGE
                 elif row[col_idx] > edge_threshold : 
                     distance = 0
+                    logging.debug("found positive edge at row={0} col={1} state={2}".format(
+                         row_idx,col_idx,state))
                     state = STATE_SEEK_NEGATIVE_EDGE_2
                     debug.append((col_idx,row[col_idx],state))
 
@@ -132,20 +138,46 @@ def find_fiducials(ndata):
                 distance += 1
                 if distance > max_distance : 
                     # didn't find what we wanted within distance; restart search
+                    logging.debug("fail distance={0} > max_distance={1} state={2}".format(
+                            distance, max_distance, state ) )
                     distance = 0
                     logging.debug("restart at state={0} col={1}".format(
                             state,col_idx))
                     state = STATE_SEEK_NEGATIVE_EDGE
                 elif row[col_idx] < -edge_threshold : 
                     distance = 0
-                    print "found fiducial at row={0} col={1}".format(row_idx,col_idx)
+#                    print "found fiducial at row={0} col={1}".format(row_idx,col_idx)
+#                    fiducial_list.append({"row":row_idx,"col":col_idx})
+#                    break
+                    logging.debug("found negative edge at row={0} col={1} state={2}".format(
+                         row_idx,col_idx,state))
+                    state = STATE_SEEK_FLAT_2
+                    max_distance = 5
+
+            elif state==STATE_SEEK_FLAT_2 : 
+                distance += 1
+                logging.debug("state={0} distance={1} max_distance={2}".format(
+                                state,distance,max_distance))
+                if distance >= max_distance : 
+                    # didn't find what we wanted within distance; restart search
+                    logging.debug("fail distance={0} > max_distance={1} state={2}".format(
+                            distance, max_distance, state ) )
+                    distance = 0
+                    logging.debug("restart at state={0} col={1}".format(
+                            state,col_idx))
+                    state = STATE_SEEK_NEGATIVE_EDGE
+                elif row[col_idx]>-flat_threshold and row[col_idx]<flat_threshold :
+                    distance = 0
+                    logging.info("found fiducial at row={0} col={1}".format(row_idx,col_idx))
                     fiducial_list.append({"row":row_idx,"col":col_idx})
+                    # Leave col_idx loop. Start new search at next row.
                     break
             else : 
                 pass
 
-    # filter_fiducials() removes the outliers
-    return filter_fiducials( fiducial_list )
+#    # filter_fiducials() removes the outliers
+#    return filter_fiducials( fiducial_list )
+    return fiducial_list
 
 def euclidian(p1,p2):
     # calculate euclidian distance
@@ -221,11 +253,11 @@ def make_clusters( fiducial_list ) :
 
     return clusters_hash
 
-def write_fiducial_image( infilename, fiducial_list ) :
+def write_fiducial_image( ndata , fiducial_list ) :
     # load the mono image, convert to color, write red dots on the image where
     # we think we found the fiducial
 
-    ndata = imtools.load_image(infilename,mode="L",dtype="uint8")
+#    ndata = imtools.load_image(infilename,mode="L",dtype="uint8")
     # make into an RGB image
     rgbdata = np.zeros((ndata.shape[0],ndata.shape[1],3))
     rgbdata[:,:,0] = ndata
@@ -235,6 +267,7 @@ def write_fiducial_image( infilename, fiducial_list ) :
     for fiducial in fiducial_list:
         row = fiducial["row"]
         col = fiducial["col"]
+        print row,col
         rgbdata[row,col,0] = 255
         rgbdata[row,col,1] = 0 
         rgbdata[row,col,2] = 0 
@@ -253,9 +286,14 @@ def draw_fiducials(infilename,fiducial_points_list):
     draw = ImageDraw.Draw(img)
 
     for fiducial_points in fiducial_points_list : 
-        # note I'm swapping from NumPy "row,col" to PIL's "x,y"
-        top_right = (fiducial_points[0]["col"],fiducial_points[0]["row"])
-        bottom_right = (fiducial_points[-1]["col"],fiducial_points[-1]["row"])
+        # Note I'm swapping from NumPy "row,col" to PIL's "x,y".
+        #
+        # Note also I'm pulling the right side of the bounding box back to line
+        # up with the fiducial. The search state machine ends looking at the
+        # flat spot after the white line. So back up a few pixels to land at
+        # the white.
+        top_right = (fiducial_points[0]["col"]-5,fiducial_points[0]["row"])
+        bottom_right = (fiducial_points[-1]["col"]-5,fiducial_points[-1]["row"])
         top_left = top_right[0]-FIDUCIAL_WIDTH,top_right[1]
 
         draw.rectangle((top_left,bottom_right),outline=(0xff,0,0))
@@ -264,6 +302,14 @@ def draw_fiducials(infilename,fiducial_points_list):
 
 def find_fiducials_in_file(infilename):
     ndata = imtools.load_image(infilename,mode="L")
+
+    imtools.clip_and_save(ndata,"gray.tif")
+
+    # filter to smooth out noise 
+#    fdata = scipy.ndimage.filters.gaussian_filter( ndata, 1 )
+##    fdata = scipy.ndimage.filters.median_filter( ndata, size=(5,5) )
+#    del ndata
+#    ndata = np.copy(fdata)
 
     # While developing the filter code, save the fiducials list to a pickle.
     # The image processing part is a bit slow.
@@ -278,8 +324,8 @@ def find_fiducials_in_file(infilename):
     filtered_fiducial_list = filter_fiducials(fiducial_list)
 #    print fiducial_list
 
-    write_fiducial_image(infilename,fiducial_list)
-#    write_fiducial_image(infilename,filtered_fiducial_list)
+#    write_fiducial_image(ndata,fiducial_list)
+    write_fiducial_image(ndata,filtered_fiducial_list)
 
     clusters_hash = make_clusters(filtered_fiducial_list)
     print clusters_hash.keys()
@@ -319,8 +365,8 @@ def find_fiducials_in_file(infilename):
 #    plt.show()
 
 def main() : 
-#    logging.basicConfig(format='%(levelname)s:%(message)s',level=logging.INFO)
-    logging.basicConfig(format='%(levelname)s:%(message)s',level=logging.DEBUG)
+    logging.basicConfig(format='%(levelname)s:%(message)s',level=logging.INFO)
+#    logging.basicConfig(format='%(levelname)s:%(message)s',level=logging.DEBUG)
     infilename = sys.argv[1]
 
     find_fiducials_in_file(infilename)
