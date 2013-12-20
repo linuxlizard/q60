@@ -34,7 +34,7 @@ STATE_SEEK_FLAT_2=6           # small or no difference
 edge_threshold = 20
 flat_threshold = 2
 
-def find_fiducials(ndata):
+def find_fiducials_sm(ndata):
 
     pixel_diffs = np.diff(ndata)
 
@@ -175,8 +175,40 @@ def find_fiducials(ndata):
             else : 
                 pass
 
-#    # filter_fiducials() removes the outliers
-#    return filter_fiducials( fiducial_list )
+    return fiducial_list
+
+def find_fiducials_correlate(ndata):
+
+    pixel_diffs = np.diff(ndata)
+
+    fiducial_list = []
+
+    fiducial = np.array([  0,   0,  -1,   0,  -1,  -1,  -9, -35, -23,  36,  27,   6,   3,
+         1,  -3,   0,   2,   1,  -1,   0,   2,   1,   0,   0,  -2,  -1,
+         0,   1,   0,  -1,  -1,  -1,   0,   1,   2,  -2,   1,  -1,   0,
+        -1,   1,   1,   1,   1,   1,  13,  36,  18, -35, -27,  -7,  -2,
+        -1,  -1,   1,  -2,   1,   1,  -3], dtype=np.int32)
+
+    fiducial = np.array([  0,   0,  -1,   0,  -1,  -1,  -9, -35, -23,  36,  27,   6,   3,
+         1,  -3,   0,   2,   1,  -1,   0,   2,   1,   0,   0,  -2,  -1,
+         0,   1,   0,  -1,  -1,  -1,   0,   1,   2,  -2,   1,  -1,   0,
+        -1,   1,   1,   1,   1,   1,  13,  36,  18, -35, -27,  -7,  -2,
+        -1,  -1,   1,  -2,   1,   1,  -3,   0,   0,   0,   0,   0,   0,
+         0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+         0,   0,   0,   0,   0,   0,   0], dtype=np.int32)
+
+    mask = fiducial
+#    mask = fiducial[::-1]
+
+    for row_idx,row in enumerate(pixel_diffs) : 
+        z = np.correlate(row,mask)
+#        z = np.correlate(row[::-1],mask)
+        col_idx = np.argmax(z)
+        print "row={0} col={1} corr={2}".format(row_idx,col_idx,z[col_idx])
+#        col_idx = ndata.shape[1]-col_idx
+        fiducial_list.append( { "row":row_idx, "col":col_idx,
+                                "corr_score":z[col_idx] } )
+
     return fiducial_list
 
 def euclidian(p1,p2):
@@ -251,6 +283,14 @@ def make_clusters( fiducial_list ) :
             clusters_hash[fid["group"]] = []
         clusters_hash[fid["group"]].append(fid)
 
+    # while fiddling with np.correlate(), calculate the mean of the correlation
+    # score
+    if "corr_score" in fiducial_list[0] : 
+        # we called find_fiducials_correlate() to make this list
+        pass
+#        for k in clusters_hash : 
+#            print 
+        
     return clusters_hash
 
 def write_fiducial_image( ndata , fiducial_list ) :
@@ -267,7 +307,6 @@ def write_fiducial_image( ndata , fiducial_list ) :
     for fiducial in fiducial_list:
         row = fiducial["row"]
         col = fiducial["col"]
-        print row,col
         rgbdata[row,col,0] = 255
         rgbdata[row,col,1] = 0 
         rgbdata[row,col,2] = 0 
@@ -305,6 +344,10 @@ def find_fiducials_in_file(infilename):
 
     imtools.clip_and_save(ndata,"gray.tif")
 
+    # tinkering with a couple different ways to find the fiducials
+#    find_fiducials = find_fiducials_sm  # state machine (slow but accurate-ish)
+    find_fiducials = find_fiducials_correlate # mathematicl correlate (fast but accuracy ??? )
+    
     # filter to smooth out noise 
 #    fdata = scipy.ndimage.filters.gaussian_filter( ndata, 1 )
 ##    fdata = scipy.ndimage.filters.median_filter( ndata, size=(5,5) )
@@ -328,22 +371,46 @@ def find_fiducials_in_file(infilename):
     write_fiducial_image(ndata,filtered_fiducial_list)
 
     clusters_hash = make_clusters(filtered_fiducial_list)
-    print clusters_hash.keys()
+#    print clusters_hash.keys()
+
+    # filter out teeny tiny clusters
+    new_clusters_hash = {}
+    for k in clusters_hash : 
+        if len(clusters_hash[k]) > 10 : 
+            new_clusters_hash[k] = clusters_hash[k]
+#    del clusters_hash
+    clusters_hash = new_clusters_hash
+    del new_clusters_hash
 
     for k in clusters_hash:
-        print k, len(clusters_hash[k])
+        # gather all the correlation scores for this cluster
+        cluster_scores = np.asarray( [ fid["corr_score"] for fid in clusters_hash[k] ] )
+        if len(clusters_hash[k]) > 10 : 
+            print "clusters key={0} len={1} mean={2} median={3} std={4}".format( 
+                k, len(clusters_hash[k]), np.mean(cluster_scores),
+                np.median(cluster_scores), np.std(cluster_scores) )
+
 
     # Of all the connected components we found, the largest two groups should
     # be our fiducials. 
     group_ids = clusters_hash.keys()
-    group_ids.sort( 
-        lambda k1, k2 : cmp( len(clusters_hash[k2]), len(clusters_hash[k1]) )
-        )
-    print group_ids
+    if 0 : 
+        # sort by length of the cluster
+        group_ids.sort( 
+            lambda k1, k2 : cmp( len(clusters_hash[k2]), len(clusters_hash[k1]) )
+            )
+    else : 
+        # sort by best correlation score
+        mkarray = lambda key : np.asarray([fid["corr_score"] for fid in clusters_hash[key]])
+        group_ids.sort( 
+            lambda k1, k2 : cmp( np.mean(mkarray(k2)), 
+                                 np.mean(mkarray(k1)) )
+            )
+    for g in group_ids : 
+        print "gid={0} len={1}".format(g,len(clusters_hash[g]))
 
     # first two elements should be our largest groups
-    draw_fiducials(infilename,(clusters_hash[group_ids[0]],
-                               clusters_hash[group_ids[1]]))
+    draw_fiducials(infilename, [ clusters_hash[g] for g in group_ids[0:4]])
 
 #    for fid in filtered_fiducial_list :
 #        print fid["row"], fid["col"], fid["dist_prev"],fid["dist_next"],fid["group"]
